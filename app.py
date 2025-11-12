@@ -3,7 +3,6 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.express as px
-import plotly.graph_objects as go
 from sklearn.impute import KNNImputer
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import train_test_split
@@ -13,11 +12,10 @@ from tensorflow.keras.layers import Dense, Dropout
 import os
 import glob
 import warnings
-from scipy.optimize import minimize
 
 warnings.filterwarnings("ignore")
 
-# ==================== Page configuration ====================
+# ==================== Page Configuration ====================
 st.set_page_config(page_title="Concrete Strength Predictor", layout="wide")
 st.markdown("""
 <style>
@@ -29,7 +27,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# --- TensorFlow settings ---
+# --- TensorFlow CPU only ---
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
 tf.config.set_visible_devices([], "GPU")
 
@@ -45,7 +43,7 @@ for f in glob.glob("concrete_strength_model.*"):
         try: os.remove(f)
         except: pass
 
-# ==================== Column renaming ====================
+# ==================== Column Renaming ====================
 def rename_columns(df, has_strength=False):
     base = [
         "Cement", "Blast_Furnace_Slag", "Fly_Ash", "Water", "Superplasticizer",
@@ -58,7 +56,7 @@ def rename_columns(df, has_strength=False):
         df.columns = base
     return df
 
-# ==================== Preprocessing ====================
+# ==================== Imputation ====================
 def impute_missing_values(df):
     df = df.copy()
     feats = df.drop(columns=["Cement_Moisture_Factor"], errors="ignore")
@@ -70,6 +68,7 @@ def impute_missing_values(df):
     final = knn2.fit_transform(df_imp)
     return pd.DataFrame(final, columns=df_imp.columns, index=df.index)
 
+# ==================== Model ====================
 def build_model(input_dim):
     model = Sequential([
         Dense(128, activation="relu", input_shape=(input_dim,)),
@@ -82,7 +81,7 @@ def build_model(input_dim):
     model.compile(optimizer="adam", loss="mse", metrics=["mae"])
     return model
 
-# ==================== Load data ====================
+# ==================== Load Data ====================
 @st.cache_data
 def load_data():
     try:
@@ -118,9 +117,9 @@ def preprocess(df, is_train=True, scaler=None):
 
 X_scaled, y, scaler, features = preprocess(train_df, is_train=True)
 
-# ==================== Train / Load model ====================
+# ==================== Train / Load Model ====================
 if not os.path.exists(MODEL_PATH):
-    with st.spinner("Training model…"):
+    with st.spinner("Training model..."):
         model = build_model(X_scaled.shape[1])
         X_tr, X_val, y_tr, y_val = train_test_split(X_scaled, y, test_size=0.2, random_state=42)
         model.fit(X_tr, y_tr, validation_data=(X_val, y_val), epochs=100, batch_size=32, verbose=0)
@@ -130,37 +129,35 @@ else:
     model = load_model(MODEL_PATH)
     st.success("Model loaded.")
 
-# ==================== Inverse Prediction Function ====================
+# ==================== Prediction Helper ====================
 def predict_strength_from_inputs(inputs, scaler, model, features):
     df_in = pd.DataFrame([inputs])
     scaled = scaler.transform(df_in[features])
     return model.predict(scaled, verbose=0)[0][0]
 
-def find_optimal_mix(target_strength, scaler, model, features, max_iterations=200):
-    # Bounds based on training data (95th percentile)
-    bounds = []
-    for f in features:
-        min_val = max(0, train_df[f].quantile(0.01))
-        max_val = train_df[f].quantile(0.99)
-        bounds.append((min_val, max_val))
+# ==================== SMART INVERSE SEARCH (در داده‌های واقعی) ====================
+def find_optimal_mix(target_strength, scaler, model, features):
+    # پیش‌بینی Strength برای همه داده‌های آموزشی
+    X_scaled = scaler.transform(train_df[features])
+    train_pred = model.predict(X_scaled, verbose=0).flatten()
     
-    # Initial guess: mean of training data
-    x0 = [train_df[f].mean() for f in features]
+    # فیلتر نزدیک‌ترین ترکیب‌ها (±10 MPa)
+    mask = np.abs(train_pred - target_strength) <= 10
+    if not np.any(mask):
+        min_error = np.min(np.abs(train_pred - target_strength))
+        st.warning(f"No mix within 10 MPa. Using closest: ±{min_error:.1f} MPa.")
+        mask = np.ones(len(train_pred), dtype=bool)
     
-    def loss(x):
-        inputs = dict(zip(features, x))
-        pred = predict_strength_from_inputs(inputs, scaler, model, features)
-        return abs(pred - target_strength)
+    candidates = train_df[mask].copy()
+    candidates['Predicted_Strength'] = train_pred[mask]
+    candidates['Error'] = np.abs(candidates['Predicted_Strength'] - target_strength)
     
-    result = minimize(
-        loss, x0,
-        method='L-BFGS-B',
-        bounds=bounds,
-        options={'maxiter': max_iterations, 'ftol': 1e-4}
-    )
+    # بهترین ترکیب (کمترین خطا)
+    best_row = candidates.loc[candidates['Error'].idxmin()]
     
-    optimal = dict(zip(features, result.x))
-    predicted = predict_strength_from_inputs(optimal, scaler, model, features)
+    optimal = best_row[features].to_dict()
+    predicted = best_row['Predicted_Strength']
+    
     return optimal, predicted
 
 # ==================== Tabs ====================
@@ -212,7 +209,7 @@ with tab1:
 # ==================== Tab 2: Upload CSV ====================
 with tab2:
     st.header("Upload Your Own CSV")
-    uploaded = st.file_uploader("Choose CSV", type=["csv"])
+    uploaded = st.file_uploader("Choose CSV file", type=["csv"])
     if uploaded:
         try:
             user_df = pd.read_csv(uploaded)
@@ -223,7 +220,7 @@ with tab2:
             scaled, _, _ = preprocess(user_df, is_train=False, scaler=scaler)
             preds = model.predict(scaled, verbose=0).flatten()
             user_df["Predicted_Strength"] = preds
-            st.success("Done!")
+            st.success("Predictions completed!")
             st.dataframe(user_df.head(10))
 
             csv = user_df.to_csv(index=False).encode()
@@ -247,30 +244,24 @@ with tab3:
             st.success(f"Predicted strength: **{pred:.2f} MPa**")
             st.balloons()
 
-# ==================== Tab 4: Design Mix for Target Strength ====================
+# ==================== Tab 4: Design Mix for Target ====================
 with tab4:
     st.header("Design Mix for Target Strength")
-    st.markdown("Enter your **desired strength** and get the **optimal mix design**.")
-    
-    target = st.number_input("Target Strength (MPa)", min_value=10.0, max_value=80.0, value=40.0, step=1.0)
-    
-    if st.button("Find Optimal Mix"):
-        with st.spinner("Optimizing mix design..."):
-            try:
-                optimal_mix, achieved = find_optimal_mix(target, scaler, model, features)
-                error = abs(achieved - target)
-                
-                st.success(f"**Optimal mix found!**")
-                st.markdown(f"**Achieved Strength**: `{achieved:.2f} MPa` (Target: `{target:.1f} MPa`, Error: `{error:.2f} MPa`)")
-                
-                mix_df = pd.DataFrame([optimal_mix]).T
-                mix_df.columns = ["Suggested Value"]
-                mix_df.index.name = "Component"
-                st.table(mix_df.round(2))
-                
-                # Show prediction
-                pred_check = predict_strength_from_inputs(optimal_mix, scaler, model, features)
-                st.info(f"Model prediction with this mix: **{pred_check:.2f} MPa**")
-                
-            except Exception as e:
-                st.error(f"Optimization failed: {e}")
+    st.markdown("Enter your **desired strength** → get a **real, tested mix** from the dataset.")
+
+    target = st.number_input("Target Strength (MPa)", min_value=15.0, max_value=75.0, value=40.0, step=1.0)
+
+    if st.button("Find Best Real Mix"):
+        with st.spinner("Searching in real data..."):
+            optimal_mix, achieved = find_optimal_mix(target, scaler, model, features)
+            error = abs(achieved - target)
+
+            st.success(f"**Best real mix found!**")
+            st.markdown(f"**Target**: `{target:.1f} MPa` → **Achieved**: `{achieved:.2f} MPa` (Δ `{error:.2f} MPa`)")
+
+            mix_df = pd.DataFrame([optimal_mix]).T.round(2)
+            mix_df.columns = ["Value"]
+            mix_df.index.name = "Component"
+            st.table(mix_df)
+
+            st.info("This mix **exists in the original dataset** and has been experimentally tested.")
