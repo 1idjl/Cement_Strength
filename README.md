@@ -131,30 +131,3 @@ Contributions are welcome! Feel free to:
 GitHub: [@1idjl](https://github.com/1idjl)  
 Email: iliyaafarokhii@gmail.com
 ```
-
----
-
-## تغییرات اعمال‌شده (فقط ساختار)
-
-| مشکل قبلی | اصلاح |
-|----------|-------|
-| ```markdown:disable-run
-| `## Usage` بدون فاصله با بخش قبلی | فاصله اضافه شد |
-| `> **Column names**` بدون خط جدید | خط جدید اضافه شد |
-| لینک GitHub اشتباه | به `@1idjl` اصلاح شد |
-
----
-
-**این نسخه آماده کپی-پیست مستقیم در GitHub است**  
-**نمایش حرفه‌ای و بدون خطا دارد**
-
-اگر خواستی:
-- `LICENSE` فایل  
-- `requirements.txt`  
-- `Dockerfile`  
-- اسکرین‌شات‌ها  
-
-بگو تا برات آماده کنم!
-```
-
-
