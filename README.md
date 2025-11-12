@@ -1,3 +1,6 @@
+## `README.md` — نسخه نهایی و کامل (با قابلیت معکوس)
+
+```markdown
 # Concrete Strength Predictor  
 **A Streamlit-powered web app to predict concrete compressive strength using machine learning.**
 
@@ -15,6 +18,7 @@ This application uses a **deep neural network** to predict the **compressive str
 - **Interactive data exploration** with regression lines and correlation matrix  
 - **Upload your own CSV** for batch predictions  
 - **Manual input** for real-time single-sample prediction  
+- **Design mix for target strength** – Enter desired strength, get optimal mixture  
 - **Downloadable results** in CSV format  
 
 Perfect for civil engineers, researchers, and students working on concrete mix design.
@@ -28,6 +32,7 @@ Perfect for civil engineers, researchers, and students working on concrete mix d
 | **Data Exploration** | Scatter plots with OLS regression, R², equation, histograms, box plots, and large correlation heatmap |
 | **Custom CSV Upload** | Upload any CSV with the same 11/12 columns → get predictions instantly |
 | **Manual Prediction** | Enter values manually and see real-time results |
+| **Design Mix for Target** | Input desired strength (MPa) → get **optimal mix design** |
 | **Download Results** | Export predictions as `predictions_custom.csv` |
 | **No GPU Required** | Runs efficiently on CPU |
 
@@ -64,10 +69,10 @@ cd concrete-strength-predictor
 
 ### 2. Install dependencies
 ```bash
-pip install streamlit pandas numpy scikit-learn tensorflow-cpu plotly
+pip install streamlit pandas numpy scikit-learn tensorflow-cpu plotly scipy
 ```
 
-> Uses `tensorflow-cpu` for compatibility on all systems.
+> Uses `tensorflow-cpu` and `scipy` for optimization.
 
 ---
 
@@ -98,6 +103,14 @@ The app will launch at: [http://localhost:8501](http://localhost:8501)
 - Click **Predict** → get strength in **MPa**
 - Balloons celebrate your prediction!
 
+### 4. **Design Mix for Target Strength** (New)
+- Enter your **desired strength** (e.g., 50 MPa)
+- Click **Find Optimal Mix**
+- Get a **complete mix design** with:
+  - Cement, Water, Age, etc.
+  - Predicted strength
+  - Error from target
+
 ---
 
 ## Model Details
@@ -107,6 +120,7 @@ The app will launch at: [http://localhost:8501](http://localhost:8501)
 - **Loss**: Mean Squared Error (MSE)
 - **Training**: 100 epochs, Adam optimizer
 - **Preprocessing**: KNN Imputation + Standard Scaling
+- **Inverse Prediction**: `scipy.optimize.minimize` (L-BFGS-B) with realistic bounds
 
 ---
 
@@ -116,6 +130,7 @@ Contributions are welcome! Feel free to:
 - Open issues
 - Submit pull requests
 - Improve UI/UX or model performance
+- Add new optimization constraints (e.g., cost, CO₂)
 
 ---
 
@@ -130,4 +145,11 @@ Contributions are welcome! Feel free to:
 **Iliya_farokhi**  
 GitHub: [@1idjl](https://github.com/1idjl)  
 Email: iliyaafarokhii@gmail.com
+
+---
+
+> **"Build smarter. Predict stronger. Design on demand."**
 ```
+- **اسکرین‌شات از تب جدید**
+
+بگو تا برات آماده کنم!
