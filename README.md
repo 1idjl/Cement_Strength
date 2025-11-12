@@ -1,6 +1,3 @@
----
-
-```markdown
 # Concrete Strength Predictor  
 **A Streamlit-powered web app to predict concrete compressive strength using machine learning.**
 
@@ -159,4 +156,5 @@ Email: iliyaafarokhii@gmail.com
 
 بگو تا برات آماده کنم!
 ```
+
 
