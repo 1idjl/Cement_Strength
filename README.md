@@ -1,6 +1,3 @@
-## `README.md` — نسخه نهایی و کامل (با قابلیت معکوس)
-
-```markdown
 # Concrete Strength Predictor  
 **A Streamlit-powered web app to predict concrete compressive strength using machine learning.**
 
@@ -153,3 +150,4 @@ Email: iliyaafarokhii@gmail.com
 - **اسکرین‌شات از تب جدید**
 
 بگو تا برات آماده کنم!
+
