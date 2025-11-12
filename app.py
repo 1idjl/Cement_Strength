@@ -13,30 +13,23 @@ from tensorflow.keras.layers import Dense, Dropout
 import os
 import glob
 import warnings
+from scipy.optimize import minimize
 
 warnings.filterwarnings("ignore")
 
 # ==================== Page configuration ====================
-st.set_page_config(
-    page_title="Concrete Strength Predictor",
-    layout="wide"
-)
+st.set_page_config(page_title="Concrete Strength Predictor", layout="wide")
+st.markdown("""
+<style>
+    .main {padding: 2rem;}
+    .stButton>button {width: 100%; background: #0099cc; color: white; border-radius: 8px; padding: 0.5rem;}
+    .stDownloadButton>button {width: 100%;}
+    .stSelectbox, .stNumberInput {margin-bottom: 1rem;}
+    .stPlotlyChart {margin: 1rem 0;}
+</style>
+""", unsafe_allow_html=True)
 
-st.markdown(
-    """
-    <style>
-        .main {padding: 2rem;}
-        .stButton>button {width: 100%; background: #0099cc; color: white;
-                          border-radius: 8px; padding: 0.5rem;}
-        .stDownloadButton>button {width: 100%;}
-        .stSelectbox, .stNumberInput {margin-bottom: 1rem;}
-        .stPlotlyChart {margin: 1rem 0;}
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
-
-# --- TensorFlow settings (CPU only) ---
+# --- TensorFlow settings ---
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
 tf.config.set_visible_devices([], "GPU")
 
@@ -46,13 +39,11 @@ TEST_PATH = "Data/test.csv"
 MODEL_NAME = "concrete_strength_model.keras"
 MODEL_PATH = MODEL_NAME
 
-# --- Clean temporary model files ---
+# --- Clean temp files ---
 for f in glob.glob("concrete_strength_model.*"):
     if f != MODEL_NAME:
-        try:
-            os.remove(f)
-        except:
-            pass
+        try: os.remove(f)
+        except: pass
 
 # ==================== Column renaming ====================
 def rename_columns(df, has_strength=False):
@@ -67,7 +58,7 @@ def rename_columns(df, has_strength=False):
         df.columns = base
     return df
 
-# ==================== Helper functions ====================
+# ==================== Preprocessing ====================
 def impute_missing_values(df):
     df = df.copy()
     feats = df.drop(columns=["Cement_Moisture_Factor"], errors="ignore")
@@ -107,7 +98,7 @@ def load_data():
 train_df, test_df = load_data()
 st.success("Data loaded successfully.")
 
-# ==================== Pre‑processing ====================
+# ==================== Preprocessing ====================
 def preprocess(df, is_train=True, scaler=None):
     df = impute_missing_values(df)
     features = [
@@ -129,26 +120,56 @@ X_scaled, y, scaler, features = preprocess(train_df, is_train=True)
 
 # ==================== Train / Load model ====================
 if not os.path.exists(MODEL_PATH):
-    with st.spinner("Training the model…"):
+    with st.spinner("Training model…"):
         model = build_model(X_scaled.shape[1])
-        X_tr, X_val, y_tr, y_val = train_test_split(
-            X_scaled, y, test_size=0.2, random_state=42
-        )
-        model.fit(
-            X_tr, y_tr,
-            validation_data=(X_val, y_val),
-            epochs=100, batch_size=32, verbose=0
-        )
+        X_tr, X_val, y_tr, y_val = train_test_split(X_scaled, y, test_size=0.2, random_state=42)
+        model.fit(X_tr, y_tr, validation_data=(X_val, y_val), epochs=100, batch_size=32, verbose=0)
         model.save(MODEL_PATH)
         st.success("Model trained and saved.")
 else:
     model = load_model(MODEL_PATH)
-    st.success("Model loaded from disk.")
+    st.success("Model loaded.")
 
-# ==================== Tabs (FIXED) ====================
-tab1, tab2, tab3 = st.tabs(
-    ["Data Exploration", "Upload Custom CSV", "Manual Prediction"]
-)
+# ==================== Inverse Prediction Function ====================
+def predict_strength_from_inputs(inputs, scaler, model, features):
+    df_in = pd.DataFrame([inputs])
+    scaled = scaler.transform(df_in[features])
+    return model.predict(scaled, verbose=0)[0][0]
+
+def find_optimal_mix(target_strength, scaler, model, features, max_iterations=200):
+    # Bounds based on training data (95th percentile)
+    bounds = []
+    for f in features:
+        min_val = max(0, train_df[f].quantile(0.01))
+        max_val = train_df[f].quantile(0.99)
+        bounds.append((min_val, max_val))
+    
+    # Initial guess: mean of training data
+    x0 = [train_df[f].mean() for f in features]
+    
+    def loss(x):
+        inputs = dict(zip(features, x))
+        pred = predict_strength_from_inputs(inputs, scaler, model, features)
+        return abs(pred - target_strength)
+    
+    result = minimize(
+        loss, x0,
+        method='L-BFGS-B',
+        bounds=bounds,
+        options={'maxiter': max_iterations, 'ftol': 1e-4}
+    )
+    
+    optimal = dict(zip(features, result.x))
+    predicted = predict_strength_from_inputs(optimal, scaler, model, features)
+    return optimal, predicted
+
+# ==================== Tabs ====================
+tab1, tab2, tab3, tab4 = st.tabs([
+    "Data Exploration", 
+    "Upload Custom CSV", 
+    "Manual Prediction", 
+    "Design Mix for Target"
+])
 
 # ==================== Tab 1: Data Exploration ====================
 with tab1:
@@ -159,116 +180,58 @@ with tab1:
     with col2:
         y_col = st.selectbox("Target", options=["Strength"], index=0)
 
-    # ---- Scatter with OLS regression line + equation + R² ----
-    st.subheader("Linear relationship between feature and strength")
     fig_scatter = px.scatter(
-        train_df,
-        x=x_col,
-        y=y_col,
-        color="Age",
-        trendline="ols",
-        trendline_color_override="red",
+        train_df, x=x_col, y=y_col, color="Age",
+        trendline="ols", trendline_color_override="red",
         title=f"{x_col} vs {y_col}",
         labels={x_col: x_col.replace("_", " "), y_col: "Strength (MPa)"},
         hover_data=["Cement_per_Water"]
     )
-
-    # Add equation & R²
     results = px.get_trendline_results(fig_scatter).px_fit_results.iloc[0]
-    slope = results.params[1]
-    intercept = results.params[0]
-    r2 = results.rsquared
+    slope, intercept, r2 = results.params[1], results.params[0], results.rsquared
     equation = f"y = {slope:.3f}x + {intercept:.2f} | R² = {r2:.3f}"
-
     fig_scatter.add_annotation(
-        x=0.05, y=0.95,
-        xref="paper", yref="paper",
-        text=equation,
-        showarrow=False,
-        font=dict(size=14, color="red"),
-        bgcolor="rgba(255,255,255,0.9)",
-        bordercolor="red",
-        borderwidth=1
+        x=0.05, y=0.95, xref="paper", yref="paper",
+        text=equation, showarrow=False,
+        font=dict(size=14, color="red"), bgcolor="rgba(255,255,255,0.9)", bordercolor="red", borderwidth=1
     )
     st.plotly_chart(fig_scatter, use_container_width=True)
 
-    # ---- Distribution & Box plot ----
     col3, col4 = st.columns(2)
     with col3:
-        fig_hist = px.histogram(
-            train_df, x=x_col, nbins=30,
-            title=f"Distribution of {x_col}",
-            color_discrete_sequence=["#00cc96"]
-        )
-        st.plotly_chart(fig_hist, use_container_width=True)
+        st.plotly_chart(px.histogram(train_df, x=x_col, nbins=30, title=f"Distribution of {x_col}"), use_container_width=True)
     with col4:
-        fig_box = px.box(
-            train_df, y="Strength", x="Age",
-            title="Strength by Age",
-            color="Age"
-        )
-        st.plotly_chart(fig_box, use_container_width=True)
+        st.plotly_chart(px.box(train_df, y="Strength", x="Age", title="Strength by Age", color="Age"), use_container_width=True)
 
-    # ---- Correlation matrix (large) ----
     st.subheader("Correlation Matrix")
     corr = train_df[features + ["Strength"]].corr()
-    fig_corr = px.imshow(
-        corr,
-        text_auto=True,
-        aspect="equal",
-        color_continuous_scale="RdBu",
-        width=900,
-        height=750,
-        title="Feature‑Strength Correlations"
-    )
-    fig_corr.update_layout(
-        font=dict(size=12),
-        title_x=0.5,
-        margin=dict(l=50, r=50, t=80, b=50)
-    )
+    fig_corr = px.imshow(corr, text_auto=True, aspect="equal", color_continuous_scale="RdBu", width=900, height=750)
+    fig_corr.update_layout(font=dict(size=12), title_x=0.5)
     st.plotly_chart(fig_corr, use_container_width=True)
 
-# ==================== Tab 2: Upload Custom CSV ====================
+# ==================== Tab 2: Upload CSV ====================
 with tab2:
     st.header("Upload Your Own CSV")
-    uploaded_file = st.file_uploader("Choose a CSV file", type=["csv"])
-
-    if uploaded_file is not None:
+    uploaded = st.file_uploader("Choose CSV", type=["csv"])
+    if uploaded:
         try:
-            user_df = pd.read_csv(uploaded_file)
+            user_df = pd.read_csv(uploaded)
             has_strength = "Strength" in user_df.columns
             user_df = rename_columns(user_df, has_strength=has_strength)
-
-            st.write("Uploaded data preview:")
             st.dataframe(user_df.head())
 
-            user_scaled, _, _ = preprocess(user_df, is_train=False, scaler=scaler)
-            user_preds = model.predict(user_scaled, verbose=0).flatten()
-            user_df["Predicted_Strength"] = user_preds
-
-            st.success("Predictions completed!")
+            scaled, _, _ = preprocess(user_df, is_train=False, scaler=scaler)
+            preds = model.predict(scaled, verbose=0).flatten()
+            user_df["Predicted_Strength"] = preds
+            st.success("Done!")
             st.dataframe(user_df.head(10))
 
-            csv_bytes = user_df.to_csv(index=False).encode()
-            st.download_button(
-                "Download predictions",
-                data=csv_bytes,
-                file_name="predictions_custom.csv",
-                mime="text/csv"
-            )
+            csv = user_df.to_csv(index=False).encode()
+            st.download_button("Download predictions", data=csv, file_name="predictions_custom.csv", mime="text/csv")
 
-            fig_user = px.scatter(
-                user_df,
-                x="Cement",
-                y="Predicted_Strength",
-                color="Age",
-                size="Water",
-                title="Your Predictions"
-            )
-            st.plotly_chart(fig_user, use_container_width=True)
-
+            st.plotly_chart(px.scatter(user_df, x="Cement", y="Predicted_Strength", color="Age", size="Water", title="Your Predictions"), use_container_width=True)
         except Exception as e:
-            st.error(f"Error processing file: {e}")
+            st.error(f"Error: {e}")
 
 # ==================== Tab 3: Manual Prediction ====================
 with tab3:
@@ -276,17 +239,38 @@ with tab3:
     with st.form("manual_form"):
         cols = st.columns(3)
         inputs = {}
-        for i, feat in enumerate(features):
+        for i, f in enumerate(features):
             with cols[i % 3]:
-                label = feat.replace("_", " ").title()
-                inputs[feat] = st.number_input(label, value=0.0, format="%.4f", key=feat)
-
+                inputs[f] = st.number_input(f.replace("_", " ").title(), value=0.0, format="%.4f", key=f)
         if st.form_submit_button("Predict"):
+            pred = predict_strength_from_inputs(inputs, scaler, model, features)
+            st.success(f"Predicted strength: **{pred:.2f} MPa**")
+            st.balloons()
+
+# ==================== Tab 4: Design Mix for Target Strength ====================
+with tab4:
+    st.header("Design Mix for Target Strength")
+    st.markdown("Enter your **desired strength** and get the **optimal mix design**.")
+    
+    target = st.number_input("Target Strength (MPa)", min_value=10.0, max_value=80.0, value=40.0, step=1.0)
+    
+    if st.button("Find Optimal Mix"):
+        with st.spinner("Optimizing mix design..."):
             try:
-                input_df = pd.DataFrame([inputs])
-                scaled = scaler.transform(input_df)
-                pred = model.predict(scaled, verbose=0)[0][0]
-                st.success(f"Predicted strength: **{pred:.2f} MPa**")
-                st.balloons()
+                optimal_mix, achieved = find_optimal_mix(target, scaler, model, features)
+                error = abs(achieved - target)
+                
+                st.success(f"**Optimal mix found!**")
+                st.markdown(f"**Achieved Strength**: `{achieved:.2f} MPa` (Target: `{target:.1f} MPa`, Error: `{error:.2f} MPa`)")
+                
+                mix_df = pd.DataFrame([optimal_mix]).T
+                mix_df.columns = ["Suggested Value"]
+                mix_df.index.name = "Component"
+                st.table(mix_df.round(2))
+                
+                # Show prediction
+                pred_check = predict_strength_from_inputs(optimal_mix, scaler, model, features)
+                st.info(f"Model prediction with this mix: **{pred_check:.2f} MPa**")
+                
             except Exception as e:
-                st.error(f"Error: {e}")
+                st.error(f"Optimization failed: {e}")
