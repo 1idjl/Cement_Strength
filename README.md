@@ -142,12 +142,3 @@ Contributions are welcome! Feel free to:
 **Iliya_farokhi**  
 GitHub: [@1idjl](https://github.com/1idjl)  
 Email: iliyaafarokhii@gmail.com
-
----
-
-> **"Build smarter. Predict stronger. Design on demand."**
-```
-- **اسکرین‌شات از تب جدید**
-
-بگو تا برات آماده کنم!
-
